@@ -68,9 +68,29 @@ def run(source, mode):
                 # --- Final Signal ---
                 scanner_result = scanner_signal(flags, rs)
 
+                # --- Breakout Confirmation (Trigger Layer) ---
+                breakout_trigger = False
+                breakout_reason = ""
+
+                try:
+                    recent_high = df['High'].iloc[-21:-1].max()
+                    latest_close = df['Close'].iloc[-1]
+
+                    avg_volume_20 = df['Volume'].rolling(20).mean().iloc[-1]
+                    latest_volume = df['Volume'].iloc[-1]
+
+                    if latest_close > recent_high and latest_volume > 1.5 * avg_volume_20:
+                        breakout_trigger = True
+                        breakout_reason = "Price breakout with volume"
+                except Exception as be:
+                    breakout_reason = f"Breakout calc error: {be}"
+
+                if breakout_trigger:
+                    print(f"🚨 BREAKOUT ALERT: {symbol} -> {breakout_reason}")
+
                 # --- Optional AI (only for strong signals) ---
                 ai_result = "Skipped"
-                if scanner_result in ["🚀 ELITE BUY", "⚡ STRONG BREAKOUT"]:
+                if scanner_result == "🎯 PRE-BREAKOUT":
                     try:
                         ai_result = ai_analysis(symbol, df, fundamentals)
                     except Exception as ai_err:
@@ -84,8 +104,16 @@ def run(source, mode):
                     "rs_value": rs["rs_value"],
                     "near_52w_high": flags["near_52w_high"],
                     "dry_volume": flags["dry_volume"],
-                    "volume_spike": flags["volume_spike"],
-                    "breakout": flags["breakout"],
+                    "tight_consolidation": flags["tight_consolidation"],
+                    "near_resistance": flags["near_resistance"],
+                    "structure_score": sum([
+                    flags["near_52w_high"],
+                    flags["tight_consolidation"],
+                    flags["near_resistance"],
+                    flags["dry_volume"]
+                    ]),
+                    "breakout_trigger": breakout_trigger,
+                    "breakout_reason": breakout_reason,
                     "ai_analysis": ai_result
                 })
 
