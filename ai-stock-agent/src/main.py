@@ -1,6 +1,6 @@
 import pandas as pd
 import argparse
-from datetime import timedelta
+import json
 
 # Local imports
 from fetcher import fetch_stock_data, fetch_nifty_data
@@ -10,7 +10,7 @@ from scanner import analyze_stock, scanner_signal
 from relative_strength import calculate_rs
 from ranker import rank_stocks
 from utils import load_symbols
-from ai_agent import ai_analysis
+from ai_agent import ai_analysis, build_ai_status_output
 
 
 def backtest_breakout(df):
@@ -51,9 +51,27 @@ def backtest_breakout(df):
     }
 
 
-def run(source, mode):
+def save_ai_json_results(df):
+    if "ai_analysis_json" not in df.columns or df.empty:
+        return
+
+    json_rows = []
+    for value in df["ai_analysis_json"].dropna():
+        try:
+            json_rows.append(json.loads(value))
+        except Exception:
+            continue
+
+    with open("../data/result.json", "w", encoding="utf-8") as file:
+        json.dump(json_rows, file, ensure_ascii=False, indent=2)
+
+
+def run(source, mode, ai_research=False):
     print("🚀 Starting AI Stock Scanner...\n")
-    print(f"📥 Source: {source.upper()} | ⚙️ Mode: {mode.upper()}\n")
+    print(
+        f"📥 Source: {source.upper()} | ⚙️ Mode: {mode.upper()} | "
+        f"🌐 AI Research: {'ON' if ai_research else 'OFF'}\n"
+    )
 
     # --- Load symbols ---
     symbols = load_symbols(source)
@@ -84,14 +102,27 @@ def run(source, mode):
             # =========================================================
             if mode == "ai":
                 try:
-                    ai_result = ai_analysis(symbol, df, fundamentals)
+                    ai_result = ai_analysis(
+                        symbol,
+                        df,
+                        fundamentals,
+                        enable_web_research=ai_research
+                    )
                 except Exception as ai_err:
-                    ai_result = f"AI Error: {ai_err}"
+                    ai_result = build_ai_status_output(
+                        symbol=symbol,
+                        sentiment="Error",
+                        confidence="0%",
+                        catalysts=[],
+                        risks=[str(ai_err)],
+                        summary="AI analysis failed for this symbol."
+                    )
 
                 results.append({
                     "symbol": symbol,
                     "mode": "AI_ONLY",
-                    "ai_analysis": ai_result
+                    "ai_analysis": ai_result["markdown"],
+                    "ai_analysis_json": ai_result["json"]
                 })
 
             # =========================================================
@@ -131,12 +162,43 @@ def run(source, mode):
                 backtest_stats = backtest_breakout(df)
 
                 # --- Optional AI (only for strong signals) ---
-                ai_result = "Skipped"
+                ai_result = build_ai_status_output(
+                    symbol=symbol,
+                    sentiment="Skipped",
+                    confidence="0%",
+                    catalysts=[],
+                    risks=["AI analysis only runs for PRE-BREAKOUT scanner signals."],
+                    summary="AI analysis was skipped because this stock did not meet the AI trigger."
+                )
                 if scanner_result == "🎯 PRE-BREAKOUT":
                     try:
-                        ai_result = ai_analysis(symbol, df, fundamentals)
+                        ai_result = ai_analysis(
+                            symbol,
+                            df,
+                            fundamentals,
+                            scanner_context={
+                                "scanner_signal": scanner_result,
+                                "rs_trend": rs["rs_trend"],
+                                "rs_value": rs["rs_value"],
+                                "near_52w_high": flags["near_52w_high"],
+                                "dry_volume": flags["dry_volume"],
+                                "tight_consolidation": flags["tight_consolidation"],
+                                "near_resistance": flags["near_resistance"],
+                                "breakout_trigger": breakout_trigger,
+                                "breakout_reason": breakout_reason,
+                                "backtest": backtest_stats,
+                            },
+                            enable_web_research=ai_research
+                        )
                     except Exception as ai_err:
-                        ai_result = f"AI Error: {ai_err}"
+                        ai_result = build_ai_status_output(
+                            symbol=symbol,
+                            sentiment="Error",
+                            confidence="0%",
+                            catalysts=[],
+                            risks=[str(ai_err)],
+                            summary="AI analysis failed for this symbol."
+                        )
 
                 results.append({
                     "symbol": symbol,
@@ -159,7 +221,8 @@ def run(source, mode):
                     "bt_trades": backtest_stats["trades"],
                     "bt_win_rate": backtest_stats["win_rate"],
                     "bt_avg_return": backtest_stats["avg_return"],
-                    "ai_analysis": ai_result
+                    "ai_analysis": ai_result["markdown"],
+                    "ai_analysis_json": ai_result["json"]
                 })
 
         except Exception as e:
@@ -173,6 +236,7 @@ def run(source, mode):
     # =========================================================
     if mode == "scanner" and not output_df.empty:
         ranked_df = rank_stocks(output_df)
+        save_ai_json_results(ranked_df)
 
         # Save full ranked list
         ranked_df.to_csv("../data/output.csv", index=False)
@@ -186,6 +250,7 @@ def run(source, mode):
 
     else:
         # AI-only mode output
+        save_ai_json_results(output_df)
         output_df.to_csv("../data/output.csv", index=False)
 
     print("\n✅ Analysis complete!")
@@ -214,6 +279,12 @@ if __name__ == "__main__":
         help="Execution mode: scanner or ai"
     )
 
+    parser.add_argument(
+        "--ai-research",
+        action="store_true",
+        help="Allow the AI agent to use web search for results, news, ratings, and catalyst research"
+    )
+
     args = parser.parse_args()
 
-    run(args.source, args.mode)
+    run(args.source, args.mode, args.ai_research)
