@@ -1,5 +1,6 @@
 import pandas as pd
 import argparse
+from datetime import timedelta
 
 # Local imports
 from fetcher import fetch_stock_data, fetch_nifty_data
@@ -10,6 +11,44 @@ from relative_strength import calculate_rs
 from ranker import rank_stocks
 from utils import load_symbols
 from ai_agent import ai_analysis
+
+
+def backtest_breakout(df):
+    trades = []
+
+    for i in range(50, len(df) - 5):
+        try:
+            recent_high = df['High'].iloc[i-20:i].max()
+            close = df['Close'].iloc[i]
+            volume = df['Volume'].iloc[i]
+
+            avg_vol = df['Volume'].iloc[i-20:i].mean()
+
+            # breakout condition
+            if close > recent_high and volume > 1.5 * avg_vol:
+                entry_price = close
+                exit_price = df['Close'].iloc[i+5]
+
+                ret = (exit_price - entry_price) / entry_price
+
+                trades.append(ret)
+        except:
+            continue
+
+    if not trades:
+        return {
+            "trades": 0,
+            "win_rate": 0,
+            "avg_return": 0
+        }
+
+    wins = [t for t in trades if t > 0]
+
+    return {
+        "trades": len(trades),
+        "win_rate": round(len(wins) / len(trades) * 100, 2),
+        "avg_return": round(sum(trades) / len(trades) * 100, 2)
+    }
 
 
 def run(source, mode):
@@ -88,6 +127,9 @@ def run(source, mode):
                 if breakout_trigger:
                     print(f"🚨 BREAKOUT ALERT: {symbol} -> {breakout_reason}")
 
+                # --- Backtest Metrics ---
+                backtest_stats = backtest_breakout(df)
+
                 # --- Optional AI (only for strong signals) ---
                 ai_result = "Skipped"
                 if scanner_result == "🎯 PRE-BREAKOUT":
@@ -114,6 +156,9 @@ def run(source, mode):
                     ]),
                     "breakout_trigger": breakout_trigger,
                     "breakout_reason": breakout_reason,
+                    "bt_trades": backtest_stats["trades"],
+                    "bt_win_rate": backtest_stats["win_rate"],
+                    "bt_avg_return": backtest_stats["avg_return"],
                     "ai_analysis": ai_result
                 })
 
