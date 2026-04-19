@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.DS_Store
+ai-stock-agent/.env
+ai-stock-agent/data/output.csv
+ai-stock-agent/data/stocks.csv
+ai-stock-agent/data/stocks.txt
+ai-stock-agent/data/top_stocks.csv
